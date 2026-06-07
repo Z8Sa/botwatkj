@@ -1,0 +1,82 @@
+const fs = require("fs");
+const CONFIG = require("../config/config");
+
+// ================== DATABASE MANAGEMENT ==================
+let db = {
+    uangKas: {},
+    siswa: [],
+    role: {
+        OWNER: ["92879288541305"],
+        BENDAHARA: [""],
+        KETUA_KELAS: [""]
+    }
+};
+
+function loadDatabase() {
+    if (!fs.existsSync(CONFIG.DB_FILE)) return;
+    
+    try {
+        const fileData = JSON.parse(fs.readFileSync(CONFIG.DB_FILE));
+        
+        db = {
+            ...db,
+            ...fileData,
+            siswa: fileData.siswa || [],
+            role: {
+                OWNER: fileData.role?.OWNER || db.role.OWNER,
+                BENDAHARA: fileData.role?.BENDAHARA || [],
+                KETUA_KELAS: fileData.role?.KETUA_KELAS || []
+            },
+            uangKas: fileData.uangKas || {}
+        };
+        
+        // Normalisasi struktur uangKas
+        for (let nama in db.uangKas) {
+            if (typeof db.uangKas[nama] === "number") {
+                db.uangKas[nama] = { total: db.uangKas[nama], history: [] };
+            }
+            if (!db.uangKas[nama].history) {
+                db.uangKas[nama].history = [];
+            }
+        }
+    } catch (err) {
+        console.log("❌ Gagal load database:", err.message);
+    }
+}
+
+function saveDatabase() {
+    fs.writeFileSync(CONFIG.DB_FILE, JSON.stringify(db, null, 2));
+}
+
+function getDatabase() {
+    return db;
+}
+
+function setDatabase(newDb) {
+    db = newDb;
+    saveDatabase();
+}
+
+// ================== UTILITY FUNCTIONS ==================
+function getNumber(sender) {
+    if (!sender) return "";
+    return sender.replace(/[^0-9]/g, "");
+}
+
+function formatNumber(num) {
+    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}
+
+function formatDate() {
+    return new Date().toISOString().split("T")[0];
+}
+
+module.exports = {
+    loadDatabase,
+    saveDatabase,
+    getDatabase,
+    setDatabase,
+    getNumber,
+    formatNumber,
+    formatDate
+};

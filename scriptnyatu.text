@@ -1,0 +1,641 @@
+const {
+    default: makeWASocket,
+    useMultiFileAuthState
+} = require("@whiskeysockets/baileys");
+
+const pino = require("pino");
+const qrcode = require("qrcode-terminal");
+const axios = require("axios");
+const fs = require("fs");
+
+// ================== KONFIGURASI ==================
+const CONFIG = {
+//    OPENAI_API_KEY: "",
+    AI_MODEL: "llama-3.3-70b-versatile",
+    AI_TEMPERATURE: 0.7,
+    DB_FILE: "./databases.json",
+    SESSION_DIR: "session",
+    COMMAND_PREFIX: ".",
+    AI_COOLDOWN_MS: 1000
+};
+
+// ================== DATABASE ==================
+let db = {
+    uangKas: {},
+    siswa: [],
+    role: {
+        OWNER: ["92879288541305"],
+        BENDAHARA: [""],
+        KETUA_KELAS: [""]
+    }
+};
+
+// Fungsi untuk load database
+function loadDatabase() {
+    if (!fs.existsSync(CONFIG.DB_FILE)) return;
+    
+    try {
+        const fileData = JSON.parse(fs.readFileSync(CONFIG.DB_FILE));
+        
+        db = {
+            ...db,
+            ...fileData,
+            siswa: fileData.siswa || [],
+            role: {
+                OWNER: fileData.role?.OWNER || db.role.OWNER,
+                BENDAHARA: fileData.role?.BENDAHARA || [],
+                KETUA_KELAS: fileData.role?.KETUA_KELAS || []
+            },
+            uangKas: fileData.uangKas || {}
+        };
+        
+        // Normalisasi struktur uangKas
+        for (let nama in db.uangKas) {
+            if (typeof db.uangKas[nama] === "number") {
+                db.uangKas[nama] = { total: db.uangKas[nama], history: [] };
+            }
+            if (!db.uangKas[nama].history) {
+                db.uangKas[nama].history = [];
+            }
+        }
+    } catch (err) {
+        console.log("❌ Gagal load database:", err.message);
+    }
+}
+
+function saveDatabase() {
+    fs.writeFileSync(CONFIG.DB_FILE, JSON.stringify(db, null, 2));
+}
+
+// ================== UTILITY FUNCTIONS ==================
+function getNumber(sender) {
+    if (!sender) return "";
+    return sender.replace(/[^0-9]/g, "");
+}
+
+function getRole(sender) {
+    const num = getNumber(sender);
+    
+    if (db.role.OWNER.includes(num)) return "OWNER";
+    if (db.role.BENDAHARA.includes(num)) return "BENDAHARA";
+    if (db.role.KETUA_KELAS.includes(num)) return "KETUA_KELAS";
+    
+    return "SISWA";
+}
+
+function formatNumber(num) {
+    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}
+
+// ================== AI FUNCTIONS ==================
+let lastAITime = 0;
+
+async function askAI(text) {
+    try {
+        const response = await axios.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            {
+                model: CONFIG.AI_MODEL,
+                messages: [
+                    { role: "system", content: "Kamu asisten singkat dan jelas." },
+                    { role: "user", content: text }
+                ],
+                temperature: CONFIG.AI_TEMPERATURE
+            },
+            {
+                headers: {
+                    "Authorization": `Bearer ${CONFIG.OPENAI_API_KEY}`,
+                    "Content-Type": "application/json"
+                }
+            }
+        );
+        
+        return response.data.choices[0].message.content;
+    } catch (err) {
+        const status = err.response?.status;
+        const errorMsg = err.response?.data?.error?.message || err.message;
+        
+        if (status === 429 || errorMsg.toLowerCase().includes("rate limit")) {
+            return fallbackAI(text);
+        }
+        
+        console.log(err.response?.data || err.message);
+        return "AI error: " + errorMsg;
+    }
+}
+
+function fallbackAI(text) {
+    return "Maaf, AI sedang sibuk. Silakan coba lagi nanti.";
+}
+
+// ================== MESSAGE HANDLER ==================
+async function handleMessage(sock, msg) {
+    const messageText = msg.message?.conversation || 
+                       msg.message?.extendedTextMessage?.text || "";
+    
+    if (!messageText || !messageText.startsWith(CONFIG.COMMAND_PREFIX)) return;
+    
+    const command = messageText.slice(1).trim();
+    const sender = msg.key.participant || msg.key.remoteJid;
+    const role = getRole(sender);
+    
+    console.log(`[CMD] ${command} | Sender: ${getNumber(sender)} | Role: ${role}`);
+    
+    // Command handlers
+    const handlers = {
+        menu: () => sendMenu(sock, msg.key.remoteJid),
+        role: () => sendRole(sock, msg.key.remoteJid, role),
+        owner: () => sendOwnerInfo(sock, msg.key.remoteJid),
+        belajar: () => sendBelajarMenu(sock, msg.key.remoteJid),
+        python: () => sendPythonLink(sock, msg.key.remoteJid),
+        roadmapAiBuilder: () => sendAIMap(sock, msg.key.remoteJid),
+        kelasTKJ: () => sendKelasTKJMenu(sock, msg.key.remoteJid),
+        uangkas: () => sendKasMenu(sock, msg.key.remoteJid),
+        piket: () => sendPiketMenu(sock, msg.key.remoteJid),
+        roster: () => sendRosterMenu(sock, msg.key.remoteJid),
+        siswa: () => sendSiswaMenu(sock, msg.key.remoteJid),
+        listsiswa: () => handleListSiswa(sock, msg.key.remoteJid, role),
+        piketsenin: () => sendPiketDay(sock, msg.key.remoteJid, "SENIN"),
+        piketselasa: () => sendPiketDay(sock, msg.key.remoteJid, "SELASA"),
+        piketkamis: () => sendPiketDay(sock, msg.key.remoteJid, "KAMIS"),
+        piketjumat: () => sendPiketDay(sock, msg.key.remoteJid, "JUMAT"),
+        rostersenin: () => sendRosterDay(sock, msg.key.remoteJid, "SENIN"),
+        rosterselasa: () => sendRosterDay(sock, msg.key.remoteJid, "SELASA"),
+        rosterrabu: () => sendRosterDay(sock, msg.key.remoteJid, "RABU"),
+        rosterkamis: () => sendRosterDay(sock, msg.key.remoteJid, "KAMIS"),
+        rosterjumat: () => sendRosterDay(sock, msg.key.remoteJid, "JUMAT")
+    };
+    
+    // Handle exact match commands
+    if (handlers[command]) {
+        await handlers[command]();
+        return;
+    }
+    
+    // Handle prefix-based commands
+    if (command.startsWith("bayarkas")) {
+        await handleBayarKas(sock, msg.key.remoteJid, command, role);
+        return;
+    }
+    
+    if (command.startsWith("cekkas")) {
+        await handleCekKas(sock, msg.key.remoteJid, command);
+        return;
+    }
+    
+    if (command.startsWith("idsiswa")) {
+        await handleIdSiswa(sock, msg.key.remoteJid, command);
+        return;
+    }
+    
+    if (command.startsWith("tambahsiswa")) {
+        await handleTambahSiswa(sock, msg.key.remoteJid, command, role);
+        return;
+    }
+    
+    if (command.startsWith("hapussiswa")) {
+        await handleHapusSiswa(sock, msg.key.remoteJid, command, role);
+        return;
+    }
+    
+    if (command.startsWith("ai ")) {
+        await handleAI(sock, msg.key.remoteJid, command);
+        return;
+    }
+    
+    await sock.sendMessage(msg.key.remoteJid, {
+        text: "❌ Command tidak dikenal. Ketik .menu untuk melihat daftar perintah."
+    });
+}
+
+// ================== COMMAND HANDLERS ==================
+async function sendMenu(sock, jid) {
+    const menu = `╔════ BOT TKJ ════╗
+║ .menu
+║ .owner
+║ .belajar
+║ .kelasTKJ
+║ .role
+║ .ai <pertanyaan>
+╚═══════════════════╝`;
+    
+    await sock.sendMessage(jid, { text: menu });
+}
+
+async function sendRole(sock, jid, role) {
+    await sock.sendMessage(jid, { text: `🎭 Role kamu: ${role}` });
+}
+
+async function sendOwnerInfo(sock, jid) {
+    const info = `╔════ OWNER BOT ════╗
+║ Nama   : Ardhy7X
+║ Status : Developer Bot
+║ WhatsApp: wa.me/6285399180750
+║ GitHub : https://github.com/Z8Sa
+╚═══════════════════╝`;
+    
+    await sock.sendMessage(jid, { text: info });
+}
+
+async function sendBelajarMenu(sock, jid) {
+    const menu = `╔════ MENU BELAJAR ════╗
+║ .roadmapAiBuilder
+║ .python
+║ .javascript
+╚═══════════════════╝`;
+    
+    await sock.sendMessage(jid, { text: menu });
+}
+
+async function sendPythonLink(sock, jid) {
+    await sock.sendMessage(jid, { 
+        text: "YOUTUBE : \nhttps://youtube.com/playlist?list=PLZS-MHyEIRo59lUBwU-XHH7Ymmb04ffOY&si=pImXCdcevLTAXIYX" 
+    });
+}
+
+async function sendAIMap(sock, jid) {
+    const roadmap = `╔══ ROADMAP AI BUILDER ══╗
+
+[PONDASI]
+1. Python
+- Variable
+- Function
+- Loop
+- List & Dictionary
+- File handling
+- OOP dasar
+- API request
+
+2. Logic & Problem Solving
+- Input → Process → Output
+- Workflow thinking
+- Automation logic
+
+3. Git & GitHub
+- Repository
+- Commit
+- Push
+- Branch dasar
+
+-----------------------------------
+
+[AI & AUTOMATION]
+4. API
+- REST API
+- JSON
+- Request & Response
+- OpenAI API
+- Claude API
+- Gemini API
+
+5. Automation Tools
+- n8n
+- Make
+- Zapier
+
+6. Database
+- PostgreSQL
+- Supabase
+- Firebase dasar
+
+-----------------------------------
+
+[BACKEND & SYSTEM]
+7. Backend Development
+- FastAPI (Python)
+- Endpoint
+- Authentication dasar
+- CRUD
+
+8. Frontend Basic
+- HTML
+- CSS
+- JavaScript
+- React basic
+
+-----------------------------------
+
+[ADVANCED AI]
+9. AI Agents
+- Tool calling
+- AI workflow
+- Multi-step automation
+- Memory system
+
+10. Vector Database
+- Embedding
+- RAG
+- Knowledge base AI
+
+11. Deployment & Cloud
+- Railway
+- Render
+- Vercel
+- Docker basic
+
+╚═══════════════════╝`;
+
+    await sock.sendMessage(jid, { text: roadmap });
+}
+
+async function sendKelasTKJMenu(sock, jid) {
+    const menu = `╔══ KELAS TKJ ══╗
+║ .roster
+║ .piket
+║ .idsiswa
+║ .uangkas
+║ .siswa
+╚═══════════════╝`;
+    
+    await sock.sendMessage(jid, { text: menu });
+}
+
+async function sendKasMenu(sock, jid) {
+    const menu = `╔══ MENU KAS ══╗
+║ .bayarkas
+║ .cekkas
+╚═══════════════╝`;
+    
+    await sock.sendMessage(jid, { text: menu });
+}
+
+async function sendPiketMenu(sock, jid) {
+    const menu = `╔══ MENU PIKET ══╗
+║ .piketsenin
+║ .piketselasa
+║ .piketrabu
+║ .piketkamis
+║ .piketjumat
+╚═══════════════╝`;
+    
+    await sock.sendMessage(jid, { text: menu });
+}
+
+async function sendPiketDay(sock, jid, day) {
+    const template = `╔══ ${day} ══╗
+║ nama siswa
+║ nama siswa
+║ nama siswa
+║ nama siswa
+╚═══════════════╝`;
+    
+    await sock.sendMessage(jid, { text: template });
+}
+
+async function sendRosterMenu(sock, jid) {
+    const menu = `╔══ MENU ROSTER ══╗
+║.rostersenin
+║.rosterselasa
+║.rostrabu
+║.rosterkamis
+║.rosterjumat
+╚═══════════════╝`;
+    
+    await sock.sendMessage(jid, { text: menu });
+}
+
+async function sendRosterDay(sock, jid, day) {
+    const template = `╔══ ${day} ══╗
+║ MAPEL
+║ MAPEL
+║ MAPEL
+║ MAPEL
+╚═══════════════╝`;
+    
+    await sock.sendMessage(jid, { text: template });
+}
+
+async function sendSiswaMenu(sock, jid) {
+    const menu = `╔══ MENU SISWA ══╗
+║ .listsiswa
+║ .tambahsiswa
+║ .hapussiswa
+╚═══════════════╝`;
+    
+    await sock.sendMessage(jid, { text: menu });
+}
+
+async function handleListSiswa(sock, jid, role) {
+    if (db.siswa.length === 0) {
+        await sock.sendMessage(jid, { text: "Belum ada siswa." });
+        return;
+    }
+    
+    const list = db.siswa
+        .map((s, i) => `• ${s} ( .idsiswa ${s} )`)
+        .join("\n");
+    
+    await sock.sendMessage(jid, {
+        text: `╔══ LIST SISWA ══╗\n\n${list}\n\n╚═══════════════╝`
+    });
+}
+
+async function handleBayarKas(sock, jid, command, role) {
+    if (role !== "BENDAHARA" && role !== "OWNER") {
+        await sock.sendMessage(jid, {
+            text: "❌ Akses ditolak, kamu bukan bendahara kelas"
+        });
+        return;
+    }
+    
+    const input = command.replace("bayarkas", "").trim();
+    
+    if (!input) {
+        await sock.sendMessage(jid, {
+            text: `📌 CARA PAKAI BAYAR KAS
+
+Format:
+.bayarkas <nama> <jumlah>
+
+Contoh:
+.bayarkas rafi 5000
+.bayarkas sulkifli 7500
+.bayarkas messi 10000
+
+Note:
+- Nama tanpa spasi
+- Jumlah harus angka`
+        });
+        return;
+    }
+    
+    const parts = input.split(" ");
+    const nama = parts[0];
+    const jumlah = parts[1];
+    
+    if (!db.siswa.includes(nama)) {
+        await sock.sendMessage(jid, {
+            text: "❌ Nama tidak terdaftar di database siswa. Pastikan sudah ditambahkan oleh bendahara"
+        });
+        return;
+    }
+    
+    if (!db.uangKas[nama]) {
+        db.uangKas[nama] = { total: 0, history: [] };
+    }
+    
+    if (!Array.isArray(db.uangKas[nama].history)) {
+        db.uangKas[nama].history = [];
+    }
+    
+    db.uangKas[nama].total += parseInt(jumlah);
+    db.uangKas[nama].history.push({
+        jumlah: parseInt(jumlah),
+        by: role,
+        waktu: new Date().toISOString().split("T")[0]
+    });
+    
+    saveDatabase();
+    
+    await sock.sendMessage(jid, {
+        text: `💰 ${nama} +${formatNumber(jumlah)}\nTotal: ${formatNumber(db.uangKas[nama].total)}`
+    });
+}
+
+async function handleCekKas(sock, jid, command) {
+    const input = command.replace("cekkas", "").trim();
+    
+    if (!input) {
+        let daftar = Object.entries(db.uangKas || {})
+            .map(([nama, data]) => `- ${nama}: ${formatNumber(data.total)}`)
+            .join("\n");
+        
+        if (!daftar) daftar = "Belum ada data kas.";
+        
+        await sock.sendMessage(jid, {
+            text: `📊 DATA UANG KAS\n\n${daftar}\n\n🔎 Detail:\n.cekkas namaSiswa`
+        });
+        return;
+    }
+    
+    const nama = input;
+    const data = db.uangKas?.[nama];
+    
+    if (!data) {
+        await sock.sendMessage(jid, { text: "❌ Data kas tidak ditemukan." });
+        return;
+    }
+    
+    const history = data.history
+        .map(h => `• ${formatNumber(h.jumlah)} | ${h.by} | ${h.waktu}`)
+        .join("\n");
+    
+    await sock.sendMessage(jid, {
+        text: `📊 DETAIL KAS: ${nama}\n\n💰 Total: ${formatNumber(data.total)}\n\n📜 History:\n${history}`
+    });
+}
+
+async function handleIdSiswa(sock, jid, command) {
+    const nama = command.replace("idsiswa", "").trim();
+    
+    if (!nama) {
+        await sock.sendMessage(jid, { text: "Format: .idsiswa <nama>" });
+        return;
+    }
+    
+    if (!db.siswa.includes(nama)) {
+        await sock.sendMessage(jid, { text: "❌ Siswa belum didaftarkan." });
+        return;
+    }
+    
+    await sock.sendMessage(jid, {
+        text: `📌 DATA SISWA\n\nNama: ${nama}\nStatus: Terdaftar`
+    });
+}
+
+async function handleTambahSiswa(sock, jid, command, role) {
+    if (role !== "OWNER" && role !== "KETUA_KELAS") {
+        await sock.sendMessage(jid, {
+            text: "❌ Akses ditolak. Hanya OWNER & KETUA KELAS yang bisa menambah siswa."
+        });
+        return;
+    }
+    
+    const nama = command.replace("tambahsiswa", "").trim();
+    
+    if (!nama) {
+        await sock.sendMessage(jid, { text: "Format: .tambahsiswa nama" });
+        return;
+    }
+    
+    if (db.siswa.includes(nama)) {
+        await sock.sendMessage(jid, { text: "❌ Siswa sudah ada." });
+        return;
+    }
+    
+    db.siswa.push(nama);
+    saveDatabase();
+    
+    await sock.sendMessage(jid, { text: `✅ Siswa ditambahkan: ${nama}` });
+}
+
+async function handleHapusSiswa(sock, jid, command, role) {
+    if (role !== "OWNER" && role !== "KETUA_KELAS") {
+        await sock.sendMessage(jid, {
+            text: "❌ Akses ditolak. Hanya OWNER & KETUA_KELAS."
+        });
+        return;
+    }
+    
+    const nama = command.replace("hapussiswa", "").trim();
+    const index = db.siswa.indexOf(nama);
+    
+    if (index === -1) {
+        await sock.sendMessage(jid, { text: "❌ Siswa tidak ditemukan." });
+        return;
+    }
+    
+    db.siswa.splice(index, 1);
+    saveDatabase();
+    
+    await sock.sendMessage(jid, { text: `❌ Siswa dihapus: ${nama}` });
+}
+
+async function handleAI(sock, jid, command) {
+    const query = command.slice(3);
+    const reply = await askAI(query);
+    await sock.sendMessage(jid, { text: reply });
+}
+
+// ================== BOT INITIALIZATION ==================
+async function startBot() {
+    loadDatabase();
+    
+    const { state, saveCreds } = await useMultiFileAuthState(CONFIG.SESSION_DIR);
+    
+    const sock = makeWASocket({
+        auth: state,
+        logger: pino({ level: "silent" })
+    });
+    
+    sock.ev.on("creds.update", saveCreds);
+    
+    sock.ev.on("connection.update", (update) => {
+        const { connection, qr } = update;
+        
+        if (qr) {
+            console.log("📱 Scan QR Code:");
+            qrcode.generate(qr, { small: true });
+        }
+        
+        if (connection === "open") {
+            console.log("✅ WhatsApp Bot Connected!");
+        }
+        
+        if (connection === "close") {
+            console.log("🔄 Reconnecting...");
+            startBot();
+        }
+    });
+    
+    sock.ev.on("messages.upsert", async ({ messages }) => {
+        const msg = messages[0];
+        if (!msg.message) return;
+        await handleMessage(sock, msg);
+    });
+    
+    console.log("🚀 Bot is running...");
+}
+
+// Start the bot
+startBot();
