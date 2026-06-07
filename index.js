@@ -1,7 +1,9 @@
 require("dotenv").config();
+
 const {
     default: makeWASocket,
-    useMultiFileAuthState
+    useMultiFileAuthState,
+    DisconnectReason
 } = require("@whiskeysockets/baileys");
 
 const pino = require("pino");
@@ -11,7 +13,7 @@ const CONFIG = require("./config/config");
 const { loadDatabase, getNumber } = require("./lib/utils");
 const { getRole } = require("./lib/role");
 
-// Import handlers
+// ================== HANDLERS ==================
 const {
     sendMenu,
     sendRole,
@@ -47,21 +49,21 @@ const { handleAI } = require("./handlers/aiHandler");
 
 // ================== MESSAGE HANDLER ==================
 async function handleMessage(sock, msg) {
-    const messageText = msg.message?.conversation || 
-                       msg.message?.extendedTextMessage?.text || "";
-    
-    if (!messageText || !messageText.startsWith(CONFIG.COMMAND_PREFIX)) return;
-    
+    const messageText =
+        msg.message?.conversation ||
+        msg.message?.extendedTextMessage?.text ||
+        "";
+
+    if (!messageText.startsWith(CONFIG.COMMAND_PREFIX)) return;
+
     const command = messageText.slice(1).trim();
     const sender = msg.key.participant || msg.key.remoteJid;
-    const role = getRole(sender);
     const jid = msg.key.remoteJid;
-    
-    console.log(`[CMD] ${command} | Sender: ${getNumber(sender)} | Role: ${role}`);
-    
-    // Command routing
+    const role = getRole(sender);
+
+    console.log(`[CMD] ${command} | ${getNumber(sender)} | ${role}`);
+
     const commandMap = {
-        // Menu commands
         menu: () => sendMenu(sock, jid),
         role: () => sendRole(sock, jid, role),
         owner: () => sendOwnerInfo(sock, jid),
@@ -69,23 +71,19 @@ async function handleMessage(sock, msg) {
         python: () => sendPythonLink(sock, jid),
         roadmapAiBuilder: () => sendAIMap(sock, jid),
         kelasTKJ: () => sendKelasTKJMenu(sock, jid),
-        
-        // Kas commands
+
         uangkas: () => sendKasMenu(sock, jid),
-        
-        // Siswa commands
+
         siswa: () => sendSiswaMenu(sock, jid),
         listsiswa: () => handleListSiswa(sock, jid),
-        
-        // Piket commands
+
         piket: () => sendPiketMenu(sock, jid),
         piketsenin: () => sendPiketDay(sock, jid, "SENIN"),
         piketselasa: () => sendPiketDay(sock, jid, "SELASA"),
         piketrabu: () => sendPiketDay(sock, jid, "RABU"),
         piketkamis: () => sendPiketDay(sock, jid, "KAMIS"),
         piketjumat: () => sendPiketDay(sock, jid, "JUMAT"),
-        
-        // Roster commands
+
         roster: () => sendRosterMenu(sock, jid),
         rostersenin: () => sendRosterDay(sock, jid, "SENIN"),
         rosterselasa: () => sendRosterDay(sock, jid, "SELASA"),
@@ -93,88 +91,101 @@ async function handleMessage(sock, msg) {
         rosterkamis: () => sendRosterDay(sock, jid, "KAMIS"),
         rosterjumat: () => sendRosterDay(sock, jid, "JUMAT")
     };
-    
-    // Exact match commands
+
     if (commandMap[command]) {
-        await commandMap[command]();
-        return;
+        return await commandMap[command]();
     }
-    
-    // Prefix-based commands
+
     if (command.startsWith("bayarkas")) {
-        await handleBayarKas(sock, jid, command, sender);
-        return;
+        return await handleBayarKas(sock, jid, command, sender);
     }
-    
+
     if (command.startsWith("cekkas")) {
-        await handleCekKas(sock, jid, command);
-        return;
+        return await handleCekKas(sock, jid, command);
     }
-    
+
     if (command.startsWith("tambahsiswa")) {
-        await handleTambahSiswa(sock, jid, command, sender);
-        return;
+        return await handleTambahSiswa(sock, jid, command, sender);
     }
-    
+
     if (command.startsWith("hapussiswa")) {
-        await handleHapusSiswa(sock, jid, command, sender);
-        return;
+        return await handleHapusSiswa(sock, jid, command, sender);
     }
-    
+
     if (command.startsWith("idsiswa")) {
-        await handleIdSiswa(sock, jid, command);
-        return;
+        return await handleIdSiswa(sock, jid, command);
     }
-    
+
     if (command.startsWith("ai ")) {
-        await handleAI(sock, jid, command);
-        return;
+        return await handleAI(sock, jid, command);
     }
-    
+
     await sock.sendMessage(jid, {
-        text: "❌ Command tidak dikenal. Ketik .menu untuk melihat daftar perintah."
+        text: "❌ Command tidak dikenal. Ketik .menu"
     });
 }
 
-// ================== BOT INITIALIZATION ==================
+// ================== BOT INIT ==================
 async function startBot() {
     loadDatabase();
-    
+
     const { state, saveCreds } = await useMultiFileAuthState(CONFIG.SESSION_DIR);
-    
+
     const sock = makeWASocket({
         auth: state,
-        logger: pino({ level: "silent" })
+        logger: pino({ level: "silent" }),
+        printQRInTerminal: true
     });
-    
+
     sock.ev.on("creds.update", saveCreds);
-    
+
+    let reconnectCount = 0;
+
     sock.ev.on("connection.update", (update) => {
-        const { connection, qr } = update;
-        
+        const { connection, lastDisconnect, qr } = update;
+
         if (qr) {
-            console.log("📱 Scan QR Code:");
+            console.log("📱 QR TERDETEKSI:");
             qrcode.generate(qr, { small: true });
         }
-        
+
         if (connection === "open") {
-            console.log("✅ WhatsApp Bot Connected!");
+            reconnectCount = 0;
+            console.log("✅ BOT CONNECTED");
         }
-        
+
         if (connection === "close") {
-            console.log("🔄 Reconnecting...");
-            startBot();
+            const statusCode = lastDisconnect?.error?.output?.statusCode;
+
+            console.log("❌ Connection closed:", statusCode);
+
+            const shouldReconnect =
+                statusCode !== DisconnectReason.loggedOut;
+
+            if (!shouldReconnect) {
+                console.log("🚫 Session invalid. Hapus folder session lalu login ulang.");
+                return;
+            }
+
+            reconnectCount++;
+
+            const delay = Math.min(1000 * reconnectCount, 2000);
+
+            console.log(`🔄 Reconnecting in ${delay / 1000}s...`);
+
+            setTimeout(() => {
+                startBot();
+            }, delay);
         }
     });
-    
+
     sock.ev.on("messages.upsert", async ({ messages }) => {
         const msg = messages[0];
         if (!msg.message) return;
         await handleMessage(sock, msg);
     });
-    
+
     console.log("🚀 Bot is running...");
 }
 
-// Start the bot
 startBot();
