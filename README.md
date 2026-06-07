@@ -136,17 +136,26 @@ RAFI
 
 ## 📌 Contoh Command
 
-Siswa:
+.kelasTKJ
 ```
 
-.siswa
+╔══ KELAS TKJ ══╗
+║ .roster
+║ .piket
+║ .idsiswa
+║ .uangkas
+║ .siswa
+╚═══════════════╝
 
 ```
 
-Kas:
+.Siswa
 ```
-
-.uangkas
+╔══ MENU SISWA ══╗
+║ .listsiswa
+║ .tambahsiswa
+║ .hapussiswa
+╚═══════════════╝
 
 ```
 
@@ -169,5 +178,3 @@ AI:
 
 .ai apa itu node js
 
-```
-```
