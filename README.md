@@ -1,127 +1,58 @@
 # WhatsApp Bot TKJ
 
-Bot WhatsApp berbasis Node.js + Baileys untuk membantu manajemen kelas seperti data siswa, uang kas, jadwal, dan AI assistant.
+Bot WhatsApp berbasis Node.js + Baileys untuk manajemen kelas.
 
----
+FITUR:
+- Manajemen siswa (tambah, hapus, list)
+- Uang kas kelas (input & cek)
+- Jadwal piket & roster
+- AI assistant (.ai)
 
-## Fitur Utama
-
-Manajemen Siswa:
-- Tambah & hapus siswa
-- List seluruh siswa
-- Cek data siswa
-
-Uang Kas Kelas:
-- Input pembayaran kas
-- Cek total kas per siswa
-- Riwayat pembayaran
-
-Sistem Kelas:
-- Jadwal piket harian
-- Roster pelajaran
-
-AI Assistant:
-- Chat AI langsung dari WhatsApp (.ai <pertanyaan>)
-
----
-
-## Contoh Menu Bot
-
-Ketik:
+MENU:
 .menu
-
-Hasil:
 ╔════ BOT TKJ ════╗
 ║ .menu
 ║ .owner
 ║ .belajar
 ║ .kelasTKJ
+║ .siswa
+║ .uangkas
 ║ .ai <pertanyaan>
 ╚═══════════════════╝
 
----
-
-## Cara Install & Menjalankan
+CARA INSTALL:
 
 1. Install Node.js
 https://nodejs.org
 
-Install Git (Windows)
+2. Install Git
 https://git-scm.com/downloads
 
 Linux:
 sudo apt update
 sudo apt install git -y
 
----
-
-2. Clone Repository
+3. Clone repo
 git clone https://github.com/Z8Sa/botwatkj.git
 cd botwatkj
 
----
-
-3. Install Dependency
+4. Install dependency
 npm install
 
-atau manual:
-npm install @whiskeysockets/baileys axios pino qrcode-terminal
-
----
-
-4. Jalankan Bot
+5. Jalankan
 node index.js
 
----
+6. Scan QR WhatsApp
 
-5. Scan QR Code
-WhatsApp -> Linked Devices -> Scan QR di terminal
-
----
-
-## Catatan Penting
+CATATAN:
 - Jangan hapus folder session
-- Pastikan koneksi internet stabil
-- Bot akan restart otomatis jika disconnect
+- Pastikan internet stabil
+- Bot auto restart jika disconnect
 
----
-
-## Teknologi
+TECH:
 - Node.js
-- Baileys WhatsApp API
-- Groq AI (LLaMA 3)
+- Baileys
+- Groq AI
 
----
-
-## Developer
-Nama: RAFI
-Project: WhatsApp Bot TKJ
-Stack: Node.js
-
----
-
-## Preview Menu Bot
-
-Siswa:
-.siswa
-╔══ MENU SISWA ══╗
-║ .listsiswa
-║ .tambahsiswa
-║ .hapussiswa
-╚═══════════════╝
-
-Kas:
-.uangkas
-╔══ MENU KAS ══╗
-║ .bayarkas
-║ .cekkas
-╚═══════════════╝
-
-Roster & Piket:
-.roster / .piket
-╔══ MENU ══╗
-║ SENIN - JUMAT
-╚══════════╝
-
-AI:
-.ai apa itu node js
+DEVELOPER:
+RAFI
