@@ -3,7 +3,7 @@
 
 Bot WhatsApp berbasis **Node.js + Baileys** untuk membantu manajemen kelas seperti data siswa, uang kas, jadwal, dan AI assistant.
 
----
+
 
 ## ✨ Fitur Utama
 
@@ -28,7 +28,7 @@ Bot WhatsApp berbasis **Node.js + Baileys** untuk membantu manajemen kelas seper
 
 * Chat AI langsung dari WhatsApp (`.ai <pertanyaan>`)
 
----
+
 
 ## 📱 Contoh Menu Bot
 
@@ -50,7 +50,7 @@ Hasil:
 ╚═══════════════════╝
 ```
 
----
+
 
 ## 🚀 Cara Install & Menjalankan
 
@@ -69,7 +69,7 @@ sudo apt update
 sudo apt install git -y
 ```
 
----
+
 
 ### 2. Clone Repository
 
@@ -78,7 +78,7 @@ git clone https://github.com/Z8Sa/botwatkj.git
 cd botwatkj
 ```
 
----
+
 
 ### 3. Install dependency
 
@@ -92,7 +92,7 @@ Atau jika manual:
 npm install @whiskeysockets/baileys axios pino qrcode-terminal
 ```
 
----
+
 
 ### 4. Jalankan Bot
 
@@ -100,13 +100,13 @@ npm install @whiskeysockets/baileys axios pino qrcode-terminal
 node index.js
 ```
 
----
+
 
 ### 5. Scan QR Code
 
 Buka WhatsApp → Linked Devices → Scan QR di terminal
 
----
+
 
 ## ⚠️ Catatan Penting
 
@@ -114,7 +114,7 @@ Buka WhatsApp → Linked Devices → Scan QR di terminal
 * Pastikan koneksi stabil
 * Bot akan restart otomatis jika disconnect
 
----
+
 
 ## 🧠 Teknologi
 
@@ -122,7 +122,7 @@ Buka WhatsApp → Linked Devices → Scan QR di terminal
 * Baileys WhatsApp API
 * Groq AI (LLaMA 3)
 
----
+
 
 ## 👨‍💻 Developer
 
@@ -130,7 +130,7 @@ Buka WhatsApp → Linked Devices → Scan QR di terminal
 * Project: WhatsApp Bot TKJ
 * Stack: Node.js
 
----
+
 
 ## 📌 Preview Menu Bot
 
