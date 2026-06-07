@@ -46,8 +46,6 @@ Hasil:
 ║ .owner
 ║ .belajar
 ║ .kelasTKJ
-║ .siswa
-║ .uangkas
 ║ .ai <pertanyaan>
 ╚═══════════════════╝
 ```
